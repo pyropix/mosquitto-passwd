@@ -5,41 +5,148 @@ set -euo pipefail
 plain_file=/passwd/mosquitto.plain
 passwd_file=/passwd/mosquitto.passwd
 
-add_user_passwd()
+# Validate username for security
+validate_username()
 {
-  username=$1
-  echo "Generating password for '$username'."
-  passwd=$(openssl rand -base64 32)
+  local username=$1
 
-  json_file=/passwd/"$username"_passwd.json
-  echo "Saving username and plain-text password to '$json_file'."
-  echo -e "{\n  \"Username\":\"${username}\",\n  \"Password\":\"${passwd}\"\n}\n" > "$json_file"
+  # Check if username is empty
+  if [ -z "$username" ]; then
+    echo "Error: Username cannot be empty." >&2
+    return 1
+  fi
 
-  echo "Appending username and plain-text password to '$plain_file'."
-  echo "$username:$passwd" >> "$plain_file"
+  # Check username length (max 64 characters)
+  if [ ${#username} -gt 64 ]; then
+    echo "Error: Username '$username' is too long (max 64 characters)." >&2
+    return 1
+  fi
 
-  unset passwd
-  chmod 775 "$json_file"
+  # Only allow alphanumeric characters, underscore, hyphen, and dot
+  if ! [[ "$username" =~ ^[a-zA-Z0-9._-]+$ ]]; then
+    echo "Error: Username '$username' contains invalid characters. Only alphanumeric, underscore, hyphen, and dot are allowed." >&2
+    return 1
+  fi
+
+  return 0
 }
 
-if [ $# -eq 0 ]
-  then
-    username="user"
-    add_user_passwd $username
-  else
-    echo "Generating passwords for users: $@"
-    for username in "$@"
-    do
-        add_user_passwd "$username"
-    done
+# Check if required commands are available
+check_dependencies()
+{
+  local missing_deps=()
+
+  for cmd in openssl mosquitto_passwd; do
+    if ! command -v "$cmd" &> /dev/null; then
+      missing_deps+=("$cmd")
+    fi
+  done
+
+  if [ ${#missing_deps[@]} -gt 0 ]; then
+    echo "Error: Missing required dependencies: ${missing_deps[*]}" >&2
+    exit 1
+  fi
+}
+
+# Check if /passwd directory is writable
+check_passwd_dir()
+{
+  if [ ! -d "/passwd" ]; then
+    echo "Error: /passwd directory does not exist. Please mount a volume to /passwd." >&2
+    exit 1
+  fi
+
+  if [ ! -w "/passwd" ]; then
+    echo "Error: /passwd directory is not writable." >&2
+    exit 1
+  fi
+}
+
+add_user_passwd()
+{
+  local username=$1
+
+  # Validate username
+  if ! validate_username "$username"; then
+    echo "Skipping invalid username: '$username'" >&2
+    return 1
+  fi
+
+  echo "Generating password for '$username'."
+
+  # Generate password
+  local passwd
+  if ! passwd=$(openssl rand -base64 32); then
+    echo "Error: Failed to generate password for '$username'." >&2
+    return 1
+  fi
+
+  local json_file=/passwd/"${username}"_passwd.json
+  echo "Saving username and plain-text password to '$json_file'."
+
+  # Create JSON file with secure permissions
+  if ! echo -e "{\n  \"Username\":\"${username}\",\n  \"Password\":\"${passwd}\"\n}\n" > "$json_file"; then
+    echo "Error: Failed to write to '$json_file'." >&2
+    return 1
+  fi
+  chmod 600 "$json_file"
+
+  echo "Appending username and plain-text password to '$plain_file'."
+  if ! echo "$username:$passwd" >> "$plain_file"; then
+    echo "Error: Failed to write to '$plain_file'." >&2
+    return 1
+  fi
+
+  # Securely clear password from memory
+  passwd="XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
+  unset passwd
+
+  return 0
+}
+
+# Check dependencies and directory permissions
+check_dependencies
+check_passwd_dir
+
+if [ $# -eq 0 ]; then
+  username="user"
+  if ! add_user_passwd "$username"; then
+    echo "Error: Failed to add default user." >&2
+    exit 1
+  fi
+else
+  echo "Generating passwords for users: $*"
+  failed_users=()
+
+  for username in "$@"; do
+    if ! add_user_passwd "$username"; then
+      failed_users+=("$username")
+    fi
+  done
+
+  if [ ${#failed_users[@]} -gt 0 ]; then
+    echo "Warning: Failed to process the following users: ${failed_users[*]}" >&2
+  fi
 fi
 
 echo "Encrypting plain-text password using mosquitto_passwd."
-cp "$plain_file" "$passwd_file"
-mosquitto_passwd -U "$passwd_file"
+if ! cp "$plain_file" "$passwd_file"; then
+  echo "Error: Failed to copy '$plain_file' to '$passwd_file'." >&2
+  exit 1
+fi
+
+if ! mosquitto_passwd -U "$passwd_file"; then
+  echo "Error: Failed to encrypt password file." >&2
+  exit 1
+fi
 
 echo "Contents of '$passwd_file':"
 cat "$passwd_file"
 
-chmod 755 "$plain_file"
-chmod 755 "$passwd_file"
+# Set secure permissions (owner read/write only)
+chmod 600 "$plain_file"
+chmod 600 "$passwd_file"
+
+echo ""
+echo "WARNING: Plain-text passwords are stored in '$plain_file' and individual JSON files."
+echo "These files contain sensitive information. Ensure proper access controls are in place."
