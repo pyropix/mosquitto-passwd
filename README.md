@@ -57,6 +57,27 @@ The following command generates the password files for every user passed as comm
 
 `docker run -v ${pwd}/passwd:/passwd burkhardm/mosquitto-passwd:latest user0 user1 user2`
 
+## Configuration Options
+
+### Password Length
+
+You can customize the password length using the `PASSWORD_LENGTH` environment variable:
+
+```bash
+# Generate 64-byte (512-bit) passwords
+docker run -e PASSWORD_LENGTH=64 -v ${pwd}/passwd:/passwd burkhardm/mosquitto-passwd:latest
+
+# Generate shorter 16-byte (128-bit) passwords
+docker run -e PASSWORD_LENGTH=16 -v ${pwd}/passwd:/passwd burkhardm/mosquitto-passwd:latest
+```
+
+**Password Length Requirements:**
+- Minimum: 16 bytes (128 bits of entropy)
+- Maximum: 128 bytes (1024 bits of entropy)
+- Default: 32 bytes (256 bits of entropy)
+
+The password length is specified in bytes. The actual base64-encoded password will be approximately 33% longer.
+
 ## Username Requirements
 
 For security reasons, usernames must meet the following criteria:
@@ -109,17 +130,26 @@ See [tests/README.md](tests/README.md) for more information.
 
 ### Building Locally
 
-```bash
-# Build image
-./docker_build.sh
+The project includes a unified build script that supports multi-platform builds using Docker Buildx:
 
-# Or manually
-docker build -t mosquitto-passwd:local \
-  --build-arg BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ') \
-  --build-arg VCS_REF=$(git rev-parse --short HEAD) \
-  --build-arg BUILD_VERSION="dev" \
-  .
+```bash
+# Build for all platforms (amd64, arm64, arm/v7)
+./build.sh
+
+# Build for specific platform and load to local Docker
+./build.sh --platforms linux/amd64 --load
+
+# Build and push to registry
+./build.sh --push
+
+# Build with custom version
+./build.sh --version 0.3 --platforms linux/amd64 --load
+
+# View all options
+./build.sh --help
 ```
+
+**Legacy build scripts** (`docker_build.sh`, `arm_build.sh`) are deprecated but still available for compatibility.
 
 ## CI/CD
 

@@ -5,6 +5,31 @@ set -euo pipefail
 plain_file=/passwd/mosquitto.plain
 passwd_file=/passwd/mosquitto.passwd
 
+# Password length configuration (in bytes, base64 encoded)
+# Default: 32 bytes = 256 bits of entropy
+# Range: 16-128 bytes (128-1024 bits)
+PASSWORD_LENGTH="${PASSWORD_LENGTH:-32}"
+
+# Validate password length
+validate_password_length()
+{
+  if ! [[ "$PASSWORD_LENGTH" =~ ^[0-9]+$ ]]; then
+    echo "Error: PASSWORD_LENGTH must be a number. Got: '$PASSWORD_LENGTH'" >&2
+    exit 1
+  fi
+
+  if [ "$PASSWORD_LENGTH" -lt 16 ]; then
+    echo "Error: PASSWORD_LENGTH must be at least 16 bytes (got $PASSWORD_LENGTH)." >&2
+    echo "Hint: Use PASSWORD_LENGTH=16 or higher for security." >&2
+    exit 1
+  fi
+
+  if [ "$PASSWORD_LENGTH" -gt 128 ]; then
+    echo "Error: PASSWORD_LENGTH must be at most 128 bytes (got $PASSWORD_LENGTH)." >&2
+    exit 1
+  fi
+}
+
 # Validate username for security
 validate_username()
 {
@@ -72,11 +97,11 @@ add_user_passwd()
     return 1
   fi
 
-  echo "Generating password for '$username'."
+  echo "Generating password for '$username' (length: ${PASSWORD_LENGTH} bytes)."
 
   # Generate password
   local passwd
-  if ! passwd=$(openssl rand -base64 32); then
+  if ! passwd=$(openssl rand -base64 "$PASSWORD_LENGTH"); then
     echo "Error: Failed to generate password for '$username'." >&2
     return 1
   fi
@@ -104,9 +129,15 @@ add_user_passwd()
   return 0
 }
 
-# Check dependencies and directory permissions
+# Validate configuration and environment
+validate_password_length
 check_dependencies
 check_passwd_dir
+
+# Display configuration
+echo "Configuration:"
+echo "  Password length: ${PASSWORD_LENGTH} bytes"
+echo ""
 
 if [ $# -eq 0 ]; then
   username="user"

@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Question or Discussion
+    url: https://github.com/burkhardm/mosquitto-passwd/discussions
+    about: Ask questions or discuss ideas (if discussions are enabled)
+  - name: Security Issue
+    url: https://github.com/burkhardm/mosquitto-passwd/security/advisories/new
+    about: Report a security vulnerability (do not create a public issue)
